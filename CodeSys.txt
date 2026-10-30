@@ -1,0 +1,204 @@
+CASE iState OF
+
+    0: (* Esperar una ordre nova *)
+        xDone := FALSE;
+        xError := FALSE;
+        IF xTrigger THEN
+            xWifiValid := FALSE;
+            sResponse := '';
+            sRequest := '';
+            iState := 10;
+        END_IF;
+
+
+    10: (* Connectar amb el MikroTik *)
+        fbClient(
+            xEnable    := TRUE,
+            udiTimeOut := 5000000,
+            itfIPAddress := ipMikrotik,
+            uiPort := 80
+        );
+        IF fbClient.xActive THEN
+            iState := 20;
+        END_IF;
+        IF fbClient.xError THEN
+            xError := TRUE;
+            iState := 90;
+        END_IF;
+
+    20: (* Preparar i enviar la petició GET *)
+        sRequest := '';
+        sRequest := CONCAT(
+            sRequest,
+            'GET /rest/interface/wifi/wifi2 HTTP/1.1'
+        );
+        sRequest := CONCAT(sRequest, sCRLF);
+
+        sRequest := CONCAT(
+            sRequest,
+            'Host: 10.34.211.241'
+        );
+        sRequest := CONCAT(sRequest, sCRLF);
+
+        sRequest := CONCAT(
+            sRequest,
+            'Authorization: Basic YWRtaW46YWRtaW4='
+        );
+        sRequest := CONCAT(sRequest, sCRLF);
+
+        sRequest := CONCAT(
+            sRequest,
+            'Accept: application/json'
+        );
+        sRequest := CONCAT(sRequest, sCRLF);
+
+        sRequest := CONCAT(
+            sRequest,
+            'Connection: close'
+        );
+        sRequest := CONCAT(sRequest, sCRLF);
+
+        (* Final de les capçaleres HTTP *)
+        sRequest := CONCAT(sRequest, sCRLF);
+        fbWrite(
+            xExecute   := TRUE,
+            udiTimeOut := 5000000,
+            itfConnection := fbClient.itfConnection,
+            pData   := ADR(sRequest),
+            udiSize := INT_TO_UDINT(LEN(sRequest))
+        );
+        IF fbWrite.xDone THEN
+            iState := 25;
+        END_IF;
+        IF fbWrite.xError THEN
+            xError := TRUE;
+            iState := 90;
+        END_IF;
+
+    25: (* Reiniciar l'escriptura *)
+        fbWrite(
+            xExecute := FALSE,
+            udiTimeOut := 5000000,
+            itfConnection := fbClient.itfConnection,
+            pData := ADR(sRequest),
+            udiSize := INT_TO_UDINT(LEN(sRequest))
+        );
+
+        iState := 30;
+
+    30: (* Llegir la resposta HTTP *)
+        fbRead(
+            xEnable := TRUE,
+            itfConnection := fbClient.itfConnection,
+            pData := ADR(sResponse),
+            udiSize := SIZEOF(sResponse)
+        );
+        IF fbRead.xReady THEN
+            iState := 35;
+        END_IF;
+        IF fbRead.xError THEN
+            xError := TRUE;
+            iState := 90;
+        END_IF;
+
+    35: (* Reiniciar lectura i interpretar resposta *)
+        fbRead(
+            xEnable := FALSE,
+            itfConnection := fbClient.itfConnection,
+            pData := ADR(sResponse),
+            udiSize := SIZEOF(sResponse)
+        );
+
+        (* Comprovar que HTTP ha retornat estat 200 *)
+        iPosStatus	:= FIND(sResponse, 'HTTP/1.1 200');
+        IF iPosStatus = 0 THEN
+            iPosStatus := FIND(sResponse, 'HTTP/1.0 200');
+        END_IF;
+        IF iPosStatus = 0 THEN
+            xError := TRUE;
+            iState := 90;
+
+        ELSE
+            (* Buscar el camp disabled del JSON *)
+            iPosDisabled := FIND(
+                sResponse,
+                '"disabled"'
+            );
+            IF iPosDisabled = 0 THEN
+                xError := TRUE;
+                iState := 90;
+            ELSE
+                (* Extreure el text a partir de disabled *)
+                sDisabledField := MID(
+                    sResponse,
+                    40,
+                    iPosDisabled
+                );
+                iPosTrue := FIND(
+                    sDisabledField,
+                    'true'
+                );
+                iPosFalse := FIND(
+                    sDisabledField,
+                    'false'
+                );
+                IF (iPosTrue > 0)
+                   AND (iPosFalse = 0) THEN
+                    (* disabled = true *)
+                    xWifiON := FALSE;
+                    xWifiValid := TRUE;
+                    iState := 40;
+                ELSIF (iPosFalse > 0)
+                      AND (iPosTrue = 0) THEN
+                    (* disabled = false *)
+                    xWifiON := TRUE;
+                    xWifiValid := TRUE;
+                    iState := 40;
+                ELSE
+                    (* Camp absent o valor no interpretable *)
+                    xError := TRUE;
+                    iState := 90;
+                END_IF;
+            END_IF;
+        END_IF;
+
+    40: (* Desconnectar *)
+        fbClient(
+            xEnable := FALSE
+        );
+
+        IF NOT fbClient.xActive THEN
+            xDone := TRUE;
+            iState := 50;
+        END_IF;
+
+    50: (* Esperar que es deixi anar el trigger *)
+        IF NOT xTrigger THEN
+            iState := 0;
+        END_IF;
+
+    90: (* Neteja després d'un error *)
+        fbWrite(
+            xExecute := FALSE,
+            udiTimeOut := 5000000,
+            itfConnection := fbClient.itfConnection,
+            pData := ADR(sRequest),
+            udiSize := INT_TO_UDINT(LEN(sRequest))
+        );
+		
+        fbRead(
+            xEnable := FALSE,
+            itfConnection := fbClient.itfConnection,
+            pData := ADR(sResponse),
+            udiSize := SIZEOF(sResponse)
+        );
+
+        fbClient(
+            xEnable := FALSE
+        );
+
+        IF NOT fbClient.xActive THEN
+            iState := 50;
+        END_IF;
+
+END_CASE;
