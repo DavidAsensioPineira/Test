@@ -337,3 +337,64 @@ Aquesta separació facilita mantenir el codi, ampliar l'aplicació i treballar a
 ---
 
 Document introductori basat en l'estructura de l'exemple `ProjecteTest` / `WebApp`. Per a desplegaments reals, consulta també la documentació oficial de Django: https://docs.djangoproject.com/
+
+## 14. Per què no hem d'utilitzar runserver en producció?
+
+Quan executem:
+
+```powershell
+python manage.py runserver
+```
+
+Django inicia el seu **servidor de desenvolupament**. És el servidor que estem utilitzant mentre construïm i provem el nostre projecte.
+
+És molt pràctic durant la programació perquè:
+- S'engega fàcilment i no necessita gaire configuració.
+- Mostra missatges d'error i informació útil per depurar l'aplicació.
+- Per defecte, detecta molts canvis als fitxers Python i reinicia el procés del servidor.
+- Permet provar les pàgines des del navegador, habitualment a `http://127.0.0.1:8000/`.
+
+Però **no està dissenyat per oferir un servei real en producció**. No està optimitzat ni configurat per assumir les exigències de disponibilitat, rendiment, concurrència i seguretat d'una aplicació publicada. Per això, la documentació de Django indica expressament que no s'ha d'utilitzar el servidor de desenvolupament en producció.
+
+### Què utilitzarem en producció?
+
+En un desplegament habitual, les peticions passen per diversos components:
+
+```text
+Navegador de l'usuari
+        |
+        | Petició HTTP / HTTPS
+        v
+Nginx (servidor web / proxy invers)
+        |
+        | Encaminament cap a l'aplicació
+        v
+Gunicorn (WSGI) o Uvicorn (ASGI)
+        |
+        v
+Aplicació Django
+        |
+        v
+Base de dades
+```
+
+- **Nginx** pot rebre les connexions HTTP/HTTPS, gestionar certificats TLS, servir fitxers estàtics i actuar com a proxy invers.
+- **Gunicorn** és un servidor d'aplicacions que pot executar Django mitjançant la interfície WSGI.
+- **Uvicorn** és un servidor ASGI, adequat també per a aplicacions que necessiten funcionalitats asíncrones.
+- **Django** continua sent la nostra aplicació: les vistes, els models, les plantilles i la resta de codi no desapareixen. El que canvia és el servidor que la posa en funcionament.
+
+Aquests components són un exemple d'arquitectura possible; no és obligatori utilitzar exactament Nginx, Gunicorn i Uvicorn en tots els desplegaments. També hi ha plataformes que gestionen part d'aquesta infraestructura.
+
+### Comparació ràpida
+
+| Desenvolupament | Producció |
+|---|---|
+| `python manage.py runserver` | Servidor WSGI o ASGI, segons el desplegament |
+| Pensat per programar i fer proves | Pensat per donar servei als usuaris |
+| Configuració senzilla | Configuració de seguretat i operació específica |
+| Normalment s'executa localment | S'executa en un servidor o plataforma de producció |
+
+**Important:** Django sí que és adequat per crear aplicacions professionals. La limitació no és Django, sinó el servidor de desenvolupament `runserver`. Quan publiquem l'aplicació, mantindrem el projecte Django i el posarem en marxa amb una configuració de producció apropiada.
+
+Abans de desplegar-la, també cal revisar la configuració de seguretat: per exemple, establir `DEBUG = False`, configurar `ALLOWED_HOSTS`, protegir les credencials i habilitar HTTPS. La guia oficial és: https://docs.djangoproject.com/en/stable/howto/deployment/
+
